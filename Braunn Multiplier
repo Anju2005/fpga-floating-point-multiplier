@@ -1,0 +1,72 @@
+void tday_19_2(float *a, float *b, float *c) {
+#pragma HLS INTERFACE s_axilite port=return
+#pragma HLS INTERFACE m_axi depth=256 port=a offset=slave bundle=a_port
+#pragma HLS INTERFACE s_axilite port=a
+#pragma HLS INTERFACE m_axi depth=256 port=b offset=slave bundle=b_port
+#pragma HLS INTERFACE s_axilite port=b
+#pragma HLS INTERFACE m_axi depth=256 port=c offset=slave bundle=c_port
+#pragma HLS INTERFACE s_axilite port=c
+
+    float a_in[20], b_in[20], c_in[20];
+    #pragma HLS ARRAY_PARTITION variable=a_in complete dim=1
+    #pragma HLS ARRAY_PARTITION variable=b_in complete dim=1
+    #pragma HLS ARRAY_PARTITION variable=c_in complete dim=1
+
+    for (int i = 0; i < 20; i++) {
+        #pragma HLS PIPELINE
+        a_in[i] = a[i];
+        b_in[i] = b[i];
+    }
+
+    union float_cast {
+        float f;
+        uint32_t u;
+    };
+
+    for (int i = 0; i < 20; i++) {
+        #pragma HLS PIPELINE
+        float_cast A, B, C;
+        A.f = a_in[i];
+        B.f = b_in[i];
+
+        // Extract fields
+        uint32_t sign_a = (A.u >> 31) & 0x1;
+        uint32_t exp_a  = (A.u >> 23) & 0xFF;
+        uint32_t mant_a = A.u & 0x7FFFFF;
+
+        uint32_t sign_b = (B.u >> 31) & 0x1;
+        uint32_t exp_b  = (B.u >> 23) & 0xFF;
+        uint32_t mant_b = B.u & 0x7FFFFF;
+
+        // Add implicit leading 1
+        mant_a |= 1 << 23;
+        mant_b |= 1 << 23;
+
+        // Multiply using Braun multiplier
+        ap_uint<48> product = braun_multiplier(mant_a, mant_b);
+
+        // Normalize (ensure top bit is 1)
+        ap_uint<24> final_mant;
+        uint32_t exp_result = (exp_a + exp_b - 127);
+        if (product[47] == 1) {
+            final_mant = (product >> 24) & 0x7FFFFF; // Keep 23 bits
+            exp_result += 1;
+        } else {
+            final_mant = (product >> 23) & 0x7FFFFF;
+        }
+
+        // Get final sign
+        uint32_t sign_result = sign_a ^ sign_b;
+
+        // Compose float result
+        uint32_t result_bits = (sign_result << 31) | (exp_result << 23) | final_mant;
+
+        C.u = result_bits;
+        c_in[i] = C.f;
+    }
+
+    for (int i = 0; i < 20; i++) {
+        #pragma HLS PIPELINE
+        c[i] = c_in[i];
+    }
+}
