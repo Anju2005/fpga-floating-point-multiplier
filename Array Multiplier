@@ -1,0 +1,57 @@
+#include <ap_int.h>
+
+void AM(ap_uint<4> multiplier, ap_uint<4> multiplicand, ap_uint<8> &Sum) {
+    #pragma HLS INTERFACE m_axi depth=256 port=ultiplier offset = slave bundle=port_a
+	#pragma HLS INTERFACE s_axilite port=multiplier
+    #pragma HLS INTERFACE m_axi depth=256 port=multiplicand offset = slave bundle=port_b
+    #pragma HLS INTERFACE s_axilite port=multiplicand
+    #pragma HLS INTERFACE m_axi depth=256 port=Sum offset = slave bundle=out_sum
+    #pragma HLS INTERFACE s_axilite port=Sum
+    #pragma HLS INTERFACE s_axilite port=return
+
+	Sum=0;
+	ap_uint<8> partial_product[4];
+
+	for (int i = 0; i < 4; i++) {
+	    if ((multiplier >> i) & 1)
+	        partial_product[i] = multiplicand << i;
+	    else
+	        partial_product[i] = 0;
+	}
+	for (int i = 0; i < 4; i++) {
+	    Sum += partial_product[i];
+	}
+
+} 
+
+Testbench  code:
+
+#include <iostream>
+#include <ap_int.h>
+
+// Declare the function prototype
+void AM(ap_uint<4> multiplier, ap_uint<4> multiplicand, ap_uint<8> &Sum);
+
+int main() {
+    ap_uint<4> multiplier,multiplicand;
+    ap_uint<8> Sum;
+
+    multiplier = 0b0011;  // 3
+    multiplicand = 0b0101;  // 5
+    AM(multiplier,multiplicand,Sum);
+    std::cout << "Multiplier=" << multiplier << " Multiplicand=" << multiplicand << " => Product=" << Sum << std::endl;
+
+    multiplier = 0b1111;  // 15
+    multiplicand = 0b0001;  // 1
+    AM(multiplier,multiplicand,Sum);
+    std::cout << "Multiplier=" << multiplier << " Multiplicand=" << multiplicand << " => Product=" << Sum << std::endl;
+
+    multiplier = 0b1010;  // 10
+    multiplicand = 0b0101;  // 5
+    AM(multiplier,multiplicand,Sum);
+    std::cout << "Multiplier=" << multiplier << " Multiplicand=" << multiplicand << " => Product=" << Sum << std::endl;
+
+    return 0;
+}
+ 
+
