@@ -32,5 +32,6 @@ Metrics considered:
 
 ## Tools Used
 - Verilog HDL
+- Xilinx Vitis HLS
 - Xilinx Vivado 2023.1
 - Artix-7 (Nexys A7-100T) FPGA Board
