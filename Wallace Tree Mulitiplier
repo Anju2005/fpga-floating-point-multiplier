@@ -1,0 +1,121 @@
+#include <ap_int.h>
+
+#define MAX_COLS 65
+#define MAX_BITS 64
+#define MAX_SIZE 128
+
+// Reduce a column of bits to 2 bits max using carry-save adder logic
+void reduceColumn(ap_uint<1> col[MAX_SIZE], int &col_size,
+                  ap_uint<1> this_col_out[MAX_SIZE], int &this_col_out_size,
+                  ap_uint<1> next_col[MAX_SIZE], int &next_col_size)
+{
+    // While 3 or more bits remain, reduce using full adder
+    while (col_size >= 3) {
+        ap_uint<1> d = col[col_size - 1]; col_size--;
+        ap_uint<1> e = col[col_size - 1]; col_size--;
+        ap_uint<1> f = col[col_size - 1]; col_size--;
+
+        ap_uint<1> sum = (d ^ e) ^ f;
+        ap_uint<1> carry = (d & e) | (e & f) | (d & f);
+
+        this_col_out[this_col_out_size++] = sum;
+        next_col[next_col_size++] = carry;
+    }
+
+    // If exactly 2 bits left, half adder
+    if (col_size == 2) {
+        ap_uint<1> d = col[col_size - 1]; col_size--;
+        ap_uint<1> e = col[col_size - 1]; col_size--;
+
+        ap_uint<1> sum = d ^ e;
+        ap_uint<1> carry = d & e;
+
+        this_col_out[this_col_out_size++] = sum;
+        next_col[next_col_size++] = carry;
+    }
+
+    // If exactly 1 bit left, just pass it through
+    if (col_size == 1) {
+        this_col_out[this_col_out_size++] = col[col_size - 1];
+        col_size--;
+    }
+}
+
+// Main function implementing Wallace Tree multiplier
+void wt_20(ap_uint<32> *a, ap_uint<32> *b, ap_uint<64> *c)
+{
+#pragma HLS INTERFACE s_axilite port=return
+#pragma HLS INTERFACE m_axi depth=256 port=a offset=slave bundle=a_port
+#pragma HLS INTERFACE s_axilite port=a
+#pragma HLS INTERFACE m_axi depth=256 port=b offset=slave bundle=b_port
+#pragma HLS INTERFACE s_axilite port=b
+#pragma HLS INTERFACE m_axi depth=256 port=c offset=slave bundle=c_port
+#pragma HLS INTERFACE s_axilite port=c
+
+    ap_uint<1> pp[32][32];
+
+    for (int i = 0; i < 32; i++) {
+        for (int j = 0; j < 32; j++) {
+        	pp[i][j] = (a[0][i] & b[0][j]);
+        }
+    }
+
+    ap_uint<1> columns[MAX_COLS][MAX_SIZE]; // MAX_SIZE to hold bits in each column
+    int col_sizes[MAX_COLS] = {0}; // Number of bits in each column
+
+    // Initialize columns from partial products
+    for (int i = 0; i < 32; i++) {
+        for (int j = 0; j < 32; j++) {
+            int col_idx = i + j;
+            columns[col_idx][col_sizes[col_idx]++] = pp[i][j];
+        }
+    }
+
+    // Temporary arrays for next columns
+    ap_uint<1> next_columns[MAX_COLS][MAX_SIZE];
+    int next_col_sizes[MAX_COLS];
+
+    bool done = false;
+    while (!done) {
+        done = true;
+        // Clear next column sizes
+        for (int i = 0; i < MAX_COLS; i++) {
+            next_col_sizes[i] = 0;
+        }
+
+        // Process each column
+        for (int i = 0; i < 64; i++) {
+            if (col_sizes[i] >= 3) {
+                done = false;
+            }
+            // Reduce current column bits and produce next column bits
+            reduceColumn(columns[i], col_sizes[i],
+                         next_columns[i], next_col_sizes[i],
+                         next_columns[i + 1], next_col_sizes[i + 1]);
+        }
+
+        // Copy back next_columns to columns for next iteration
+        for (int i = 0; i < MAX_COLS; i++) {
+            col_sizes[i] = next_col_sizes[i];
+            for (int j = 0; j < col_sizes[i]; j++) {
+                columns[i][j] = next_columns[i][j];
+            }
+        }
+    }
+
+    ap_uint<64> result = 0;
+    ap_uint<1> carry = 0;
+
+    for (int i = 0; i < 64; i++) {
+    	ap_uint<1> a_bit = (col_sizes[i] > 0) ? columns[i][0] : ap_uint<1>(0);
+    	ap_uint<1> b_bit = (col_sizes[i] > 1) ? columns[i][1] : ap_uint<1>(0);
+
+        ap_uint<1> sum = a_bit ^ b_bit ^ carry;
+        ap_uint<1> new_carry = (a_bit & b_bit) | (a_bit & carry) | (b_bit & carry);
+
+        result[i] = sum;
+        carry = new_carry;
+    }
+
+    *c = result;
+} 
