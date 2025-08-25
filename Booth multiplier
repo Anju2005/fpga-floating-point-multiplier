@@ -1,0 +1,111 @@
+#include <ap_int.h>
+#include <stdint.h>
+
+// 24x24 Booth multiplier returns 48-bit product
+
+ap_uint<48> booth_multiplier(ap_uint<24> A, ap_uint<24> B) {
+    ap_uint<25> Q = B;       // 24 bits of multiplier + 1 bit for Q-1
+    ap_uint<25> Q_ext = Q << 1;  // Append Q-1 (initially 0)
+    ap_int<25> ACC = 0;
+    ap_int<25> A_ext = A;
+
+    for (int i = 0; i < 24; i++) {
+#pragma HLS UNROLL
+        ap_uint<2> y = Q_ext.range(1, 0);  // Get Q0 and Q-1
+
+        // Booth decision
+        if (y == 0b01) {
+            ACC += A_ext;
+        } else if (y == 0b10) {
+            ACC -= A_ext;
+        }
+
+        // Arithmetic right shift [ACC | Q_ext]
+        ap_int<50> combined = ((ap_int<50>)ACC << 25) | Q_ext;
+        combined >>= 1;
+
+        ACC = (combined >> 25) & 0x1FFFFFF;
+        Q_ext = combined & 0x1FFFFFF;
+    }
+
+    // Combine ACC and Q (lower 24 bits) for final result
+    ap_uint<48> product= ((ap_uint<48>)ACC << 24) | (Q_ext.range(24, 1));
+    return product;
+}
+void tday_20_1(float *a, float *b, float *c) {
+   #pragma HLS INTERFACE s_axilite port=return
+   #pragma HLS INTERFACE m_axi depth=256 port=a offset=slave bundle=a_port
+   #pragma HLS INTERFACE s_axilite port=a
+   #pragma HLS INTERFACE m_axi depth=256 port=b offset=slave bundle=b_port
+   #pragma HLS INTERFACE s_axilite port=b
+   #pragma HLS INTERFACE m_axi depth=256 port=c offset=slave bundle=c_port
+   #pragma HLS INTERFACE s_axilite port=c
+
+	float a_in[20], b_in[20], c_in[20];
+	for (int i = 0; i < 20; i++) {
+    #pragma HLS PIPELINE
+	    a_in[i] = a[i];
+	    b_in[i] = b[i];
+	}
+
+	union float_cast {
+	        float f;
+	        uint32_t u;
+	    };
+
+	    for (int i = 0; i < 20; i++) {
+	        #pragma HLS PIPELINE
+	        float_cast A, B, C;
+	        A.f = a_in[i];
+	        B.f = b_in[i];
+
+	        // Extract fields
+	        uint32_t sign_a = (A.u >> 31) & 0x1;
+	        uint32_t exp_a  = (A.u >> 23) & 0xFF;
+	        uint32_t mant_a = A.u & 0x7FFFFF;
+
+	        uint32_t sign_b = (B.u >> 31) & 0x1;
+	        uint32_t exp_b  = (B.u >> 23) & 0xFF;
+	        uint32_t mant_b = B.u & 0x7FFFFF;
+
+	        // Add implicit leading 1
+	        mant_a |= 1 << 23;
+	        mant_b |= 1 << 23;
+
+	        // Multiply using Booth multiplier
+	        ap_uint<48> product = booth_multiplier(mant_a, mant_b);
+
+	        // Normalize (ensure top bit is 1)
+	        ap_uint<24> final_mant;
+	        uint32_t exp_result = (exp_a + exp_b - 127);
+	        int shift = 0;
+
+	        // Shift left until MSB is 1
+	        while (product[47 - shift] == 0 && shift < 47) {
+	            shift++;
+	        }
+	        ap_uint<48> norm_product = product << shift;
+	        exp_result -= shift;
+
+	        // Extract final 23-bit mantissa (bits 47:24 after shift)
+	        final_mant = (norm_product >> 24) & 0x7FFFFF;
+
+	        // Get final sign
+	        uint32_t sign_result = sign_a ^ sign_b;
+
+	        // Compose float result
+	        uint32_t result_bits = (sign_result << 31) | (exp_result << 23) | final_mant;
+
+	        C.u = result_bits;
+	        c_in[i] = C.f;
+	        printf("A = %f, B = %f, Product = %f\n", A.f, B.f, C.f);
+	        printf("  Mant_A = %x, Mant_B = %x\n", mant_a, mant_b);
+	        printf("  Raw Product = %llu\n", product.to_uint64());
+	        printf("  Final Mant = %x, Exp = %u, Sign = %u\n", final_mant.to_uint(), exp_result, sign_result);
+	    }
+
+	    for (int i = 0; i < 20; i++) {
+	        #pragma HLS PIPELINE
+	        c[i] = c_in[i];
+	    }
+	} 
