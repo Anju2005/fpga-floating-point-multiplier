@@ -1,0 +1,55 @@
+#include <ap_fixed.h>
+#include <ap_int.h>
+// Base 8x8 multiplier
+	ap_uint<16> vedic_8x8(ap_uint<8> A, ap_uint<8> B) {
+	    return A * B;  // or do 4x4 splits if needed
+	}
+
+	// 16x16 using 8x8
+	ap_uint<32> vedic_16x16(ap_uint<16> A, ap_uint<16> B) {
+	    ap_uint<8> A_high = A.range(15, 8);
+	    ap_uint<8> A_low  = A.range(7, 0);
+	    ap_uint<8> B_high = B.range(15, 8);
+	    ap_uint<8> B_low  = B.range(7, 0);
+
+	    ap_uint<16> P0 = vedic_8x8(A_low, B_low);
+	    ap_uint<16> P1 = vedic_8x8(A_low, B_high);
+	    ap_uint<16> P2 = vedic_8x8(A_high, B_low);
+	    ap_uint<16> P3 = vedic_8x8(A_high, B_high);
+
+	    ap_uint<32> result = ((ap_uint<32>)P3 << 16) +
+	                         ((ap_uint<32>)(P1 + P2) << 8) +
+	                         P0;
+	    return result;
+	}
+
+	// 32x32 using 16x16
+	ap_uint<64> vedic_32x32(ap_uint<32> A, ap_uint<32> B) {
+	    ap_uint<16> A_high = A.range(31, 16);
+	    ap_uint<16> A_low  = A.range(15, 0);
+	    ap_uint<16> B_high = B.range(31, 16);
+	    ap_uint<16> B_low  = B.range(15, 0);
+
+	    ap_uint<32> P0 = vedic_16x16(A_low, B_low);
+	    ap_uint<32> P1 = vedic_16x16(A_low, B_high);
+	    ap_uint<32> P2 = vedic_16x16(A_high, B_low);
+	    ap_uint<32> P3 = vedic_16x16(A_high, B_high);
+
+	    ap_uint<64> result = ((ap_uint<64>)P3 << 32) +
+	                         ((ap_uint<64>)(P1 + P2) << 16) +
+	                         P0;
+	    return result;
+	}
+void tday_vm(ap_uint<32> *a, ap_uint<32> *b, ap_uint<64> *c)
+{
+#pragma HLS INTERFACE s_axilite port=return
+#pragma HLS INTERFACE m_axi depth=256 port=a offset=slave bundle=a_port
+#pragma HLS INTERFACE s_axilite port=a
+#pragma HLS INTERFACE m_axi depth=256 port=b offset=slave bundle=b_port
+#pragma HLS INTERFACE s_axilite port=b
+#pragma HLS INTERFACE m_axi depth=256 port=c offset=slave bundle=c_port
+#pragma HLS INTERFACE s_axilite port=c
+
+	 *c = vedic_32x32(*a, *b);
+
+}
